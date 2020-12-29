@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -21,11 +22,14 @@ const (
 )
 
 var (
-	raw          = flag.Bool("raw", false, "print raw bytes")
-	summary      = flag.Bool("summary", false, "print summary")
-	skipAdded    = flag.Bool("skip-added", false, "suppress added keys")
-	skipDeleted  = flag.Bool("skip-deleted", false, "suppress deleted keys")
-	skipModified = flag.Bool("skip-modified", false, "suppress modified items")
+	raw            = flag.Bool("raw", false, "print raw bytes")
+	summary        = flag.Bool("summary", false, "print summary")
+	excludePattern = flag.String("exclude-pattern", "", "exclude keys")
+	skipAdded      = flag.Bool("skip-added", false, "suppress added keys")
+	skipDeleted    = flag.Bool("skip-deleted", false, "suppress deleted keys")
+	skipModified   = flag.Bool("skip-modified", false, "suppress modified items")
+
+	excludeRegexp *regexp.Regexp
 )
 
 func main() {
@@ -35,12 +39,20 @@ func main() {
 }
 
 func run() error {
-	flag.Parse()
+	var err error
 
+	flag.Parse()
 	args := flag.Args()
 	if len(args) != 2 {
 		fmt.Println("Usage: boltdiff DB1 DB2")
 		return nil
+	}
+
+	if *excludePattern != "" {
+		excludeRegexp, err = regexp.Compile(*excludePattern)
+		if err != nil {
+			return err
+		}
 	}
 
 	options := &bolt.Options{ReadOnly: true}
@@ -220,6 +232,9 @@ func walkBucket(b *bolt.Bucket, buckets []string) (*strset.Set, error) {
 		}
 
 		key := strings.Join(append(buckets, string(k)), separator)
+		if excludeRegexp != nil && excludeRegexp.MatchString(key) {
+			return nil
+		}
 		keys.Add(key)
 		return nil
 	})
