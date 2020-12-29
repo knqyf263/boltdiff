@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
-	"path"
+	"sort"
 	"strings"
+	"sync"
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/fatih/color"
@@ -88,7 +90,7 @@ func printDeleted(leftKeys, rightKeys mapset.Set) {
 	})
 
 	if len(deleted) > 0 {
-		color.New(color.FgCyan, color.Bold).Print("Deleted:\n")
+		color.New(color.FgCyan, color.Bold).Printf("Deleted: %d\n", len(deleted))
 		red := color.New(color.FgRed)
 		for _, d := range deleted {
 			red.Printf("--- %s\n", d)
@@ -107,7 +109,7 @@ func printAdded(leftKeys, rightKeys mapset.Set) {
 	})
 
 	if len(added) > 0 {
-		color.New(color.FgCyan, color.Bold).Print("\nAdded:\n")
+		color.New(color.FgCyan, color.Bold).Printf("\nAdded: %d\n", len(added))
 		green := color.New(color.FgGreen)
 		for _, a := range added {
 			green.Printf("+++ %s\n", a)
