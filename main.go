@@ -11,6 +11,8 @@ import (
 	"github.com/fatih/color"
 	"github.com/google/go-cmp/cmp"
 	bolt "go.etcd.io/bbolt"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -190,17 +192,45 @@ func walkBucket(b *bolt.Bucket, buckets []string) (mapset.Set, error) {
 func walkKeys(db *bolt.DB) (mapset.Set, error) {
 	keys := mapset.NewSet()
 	err := db.View(func(tx *bolt.Tx) error {
+		g, ctx := errgroup.WithContext(context.Background())
+		sem := semaphore.NewWeighted(20)
+		done := make(chan struct{})
+
+		keysChan := make(chan mapset.Set)
+
+		go func() {
+			for k := range keysChan {
+				keys = keys.Union(k)
+			}
+			done <- struct{}{}
+		}()
+
 		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			bucketKeys, err := walkBucket(b, []string{string(name)})
-			if err != nil {
+			if err := sem.Acquire(ctx, 1); err != nil {
 				return err
 			}
-			keys = keys.Union(bucketKeys)
+			g.Go(func() error {
+				defer sem.Release(1)
+
+				log.Printf("    Bucket: %s", string(name))
+				bucketKeys, err := walkBucket(b, []string{string(name)})
+				if err != nil {
+					return err
+				}
+				keysChan <- bucketKeys
+				return nil
+			})
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+		if err := g.Wait(); err != nil {
+			return err
+		}
+		close(keysChan)
+		<-done
+
 		return nil
 	})
 	if err != nil {
