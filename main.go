@@ -7,11 +7,10 @@ import (
 	"log"
 	"sort"
 	"strings"
-	"sync"
 
-	mapset "github.com/deckarep/golang-set"
 	"github.com/fatih/color"
 	"github.com/google/go-cmp/cmp"
+	"github.com/scylladb/go-set/strset"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -22,7 +21,8 @@ const (
 )
 
 var (
-	raw = flag.Bool("raw", false, "print raw bytes")
+	raw          = flag.Bool("raw", false, "print raw bytes")
+	summary      = flag.Bool("summary", false, "print summary")
 )
 
 func main() {
@@ -61,7 +61,7 @@ func run() error {
 		return err
 	}
 
-	log.Printf("Keys (%s): %d", args[0], leftKeys.Cardinality())
+	log.Printf("Keys (%s): %d", args[0], leftKeys.Size())
 
 	log.Printf("Traversing %s keys...", args[1])
 	rightKeys, err := walkKeys(right)
@@ -79,11 +79,11 @@ func run() error {
 	return nil
 }
 
-func printDeleted(leftKeys, rightKeys mapset.Set) {
+func printDeleted(leftKeys, rightKeys *strset.Set) {
 	var deleted []string
-	leftKeys.Difference(rightKeys).Each(func(elem interface{}) bool {
-		deleted = append(deleted, elem.(string))
-		return false
+	strset.Difference(leftKeys, rightKeys).Each(func(key string) bool {
+		deleted = append(deleted, key)
+		return true
 	})
 	sort.Slice(deleted, func(i, j int) bool {
 		return deleted[i] < deleted[j]
@@ -98,11 +98,11 @@ func printDeleted(leftKeys, rightKeys mapset.Set) {
 	}
 }
 
-func printAdded(leftKeys, rightKeys mapset.Set) {
+func printAdded(leftKeys, rightKeys *strset.Set) {
 	var added []string
-	rightKeys.Difference(leftKeys).Each(func(elem interface{}) bool {
-		added = append(added, elem.(string))
-		return false
+	strset.Difference(rightKeys, leftKeys).Each(func(key string) bool {
+		added = append(added, key)
+		return true
 	})
 	sort.Slice(added, func(i, j int) bool {
 		return added[i] < added[j]
@@ -117,20 +117,26 @@ func printAdded(leftKeys, rightKeys mapset.Set) {
 	}
 }
 
-func printModified(left, right *bolt.DB, leftKeys, rightKeys mapset.Set) error {
+type modified struct {
+	key  string
+	diff string
+}
+
+func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, rightKeys *strset.Set) error {
 	var err error
-	color.New(color.FgCyan, color.Bold).Print("\nModified:\n")
+	var modifiedItems []modified
+
 	bold := color.New(color.Bold)
-	leftKeys.Intersect(rightKeys).Each(func(elem interface{}) bool {
+
+	strset.Intersection(leftKeys, rightKeys).Each(func(key string) bool {
 		var leftValue, rightValue []byte
-		key := elem.(string)
 		leftValue, err = getValue(left, key)
 		if err != nil {
-			return true
+			return false
 		}
 		rightValue, err = getValue(right, key)
 		if err != nil {
-			return true
+			return false
 		}
 
 		var v1, v2 interface{} = leftValue, rightValue
@@ -139,15 +145,24 @@ func printModified(left, right *bolt.DB, leftKeys, rightKeys mapset.Set) error {
 		}
 
 		if diff := cmp.Diff(v1, v2); diff != "" {
-			bold.Printf("diff a/%s b/%s\n", key, key)
-			bold.Printf("--- a/%s\n", key)
-			bold.Printf("--- b/%s\n", key)
-			fmt.Println(diff)
+			modifiedItems = append(modifiedItems, modified{
+				key:  key,
+				diff: diff,
+			})
 		}
-		return false
+		return true
 	})
 	if err != nil {
 		return err
+	}
+
+	color.New(color.FgCyan, color.Bold).Printf("\nModified: %d\n", len(modifiedItems))
+	}
+	for _, m := range modifiedItems {
+		bold.Printf("diff a/%s b/%s\n", leftPath, rightPath)
+		bold.Printf("--- a/%s\n", m.key)
+		bold.Printf("+++ b/%s\n", m.key)
+		fmt.Println(m.diff)
 	}
 	return nil
 }
@@ -173,8 +188,8 @@ func getValue(db *bolt.DB, key string) ([]byte, error) {
 	return value, nil
 }
 
-func walkBucket(b *bolt.Bucket, buckets []string) (mapset.Set, error) {
-	keys := mapset.NewSet()
+func walkBucket(b *bolt.Bucket, buckets []string) (*strset.Set, error) {
+	keys := strset.New()
 	err := b.ForEach(func(k, v []byte) error {
 		// k is a bucket
 		if v == nil {
@@ -182,7 +197,7 @@ func walkBucket(b *bolt.Bucket, buckets []string) (mapset.Set, error) {
 			if err != nil {
 				return err
 			}
-			keys = keys.Union(nestedKeys)
+			keys.Merge(nestedKeys)
 			return nil
 		}
 
@@ -197,18 +212,18 @@ func walkBucket(b *bolt.Bucket, buckets []string) (mapset.Set, error) {
 	return keys, nil
 }
 
-func walkKeys(db *bolt.DB) (mapset.Set, error) {
-	keys := mapset.NewSet()
+func walkKeys(db *bolt.DB) (*strset.Set, error) {
+	keys := strset.New()
 	err := db.View(func(tx *bolt.Tx) error {
 		g, ctx := errgroup.WithContext(context.Background())
 		sem := semaphore.NewWeighted(20)
 		done := make(chan struct{})
 
-		keysChan := make(chan mapset.Set)
+		keysChan := make(chan *strset.Set)
 
 		go func() {
 			for k := range keysChan {
-				keys = keys.Union(k)
+				keys.Merge(k)
 			}
 			done <- struct{}{}
 		}()
@@ -246,4 +261,3 @@ func walkKeys(db *bolt.DB) (mapset.Set, error) {
 	}
 	return keys, nil
 }
-
