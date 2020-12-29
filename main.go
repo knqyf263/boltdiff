@@ -23,6 +23,9 @@ const (
 var (
 	raw          = flag.Bool("raw", false, "print raw bytes")
 	summary      = flag.Bool("summary", false, "print summary")
+	skipAdded    = flag.Bool("skip-added", false, "suppress added keys")
+	skipDeleted  = flag.Bool("skip-deleted", false, "suppress deleted keys")
+	skipModified = flag.Bool("skip-modified", false, "suppress modified items")
 )
 
 func main() {
@@ -69,11 +72,18 @@ func run() error {
 		return err
 	}
 
-	printDeleted(leftKeys, rightKeys)
-	printAdded(leftKeys, rightKeys)
-	if err = printModified(left, right, leftKeys, rightKeys); err != nil {
-	log.Printf("Keys (%s): %d", args[1], rightKeys.Cardinality())
-		return err
+	log.Printf("Keys (%s): %d", args[1], rightKeys.Size())
+
+	if !*skipDeleted {
+		printDeleted(leftKeys, rightKeys)
+	}
+	if !*skipAdded {
+		printAdded(leftKeys, rightKeys)
+	}
+	if !*skipModified {
+		if err = printModified(args[0], args[1], left, right, leftKeys, rightKeys); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -91,6 +101,9 @@ func printDeleted(leftKeys, rightKeys *strset.Set) {
 
 	if len(deleted) > 0 {
 		color.New(color.FgCyan, color.Bold).Printf("Deleted: %d\n", len(deleted))
+		if *summary {
+			return
+		}
 		red := color.New(color.FgRed)
 		for _, d := range deleted {
 			red.Printf("--- %s\n", d)
@@ -110,6 +123,9 @@ func printAdded(leftKeys, rightKeys *strset.Set) {
 
 	if len(added) > 0 {
 		color.New(color.FgCyan, color.Bold).Printf("\nAdded: %d\n", len(added))
+		if *summary {
+			return
+		}
 		green := color.New(color.FgGreen)
 		for _, a := range added {
 			green.Printf("+++ %s\n", a)
@@ -157,6 +173,8 @@ func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, r
 	}
 
 	color.New(color.FgCyan, color.Bold).Printf("\nModified: %d\n", len(modifiedItems))
+	if *summary {
+		return nil
 	}
 	for _, m := range modifiedItems {
 		bold.Printf("diff a/%s b/%s\n", leftPath, rightPath)
