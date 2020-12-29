@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	separator = "/"
+	separator = " -> "
 )
 
 var (
@@ -144,8 +144,8 @@ func printModified(left, right *bolt.DB, leftKeys, rightKeys mapset.Set) error {
 
 func getValue(db *bolt.DB, key string) ([]byte, error) {
 	var value []byte
-	bkts, key := path.Split(key)
-	buckets := strings.Split(bkts, separator)
+	keys := strings.Split(key, separator)
+	buckets, key := keys[:len(keys)-1], keys[len(keys)-1]
 	err := db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(buckets[0]))
 		for _, b := range buckets[1:] {
