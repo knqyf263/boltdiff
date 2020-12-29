@@ -83,6 +83,9 @@ func printDeleted(leftKeys, rightKeys mapset.Set) {
 		deleted = append(deleted, elem.(string))
 		return false
 	})
+	sort.Slice(deleted, func(i, j int) bool {
+		return deleted[i] < deleted[j]
+	})
 
 	if len(deleted) > 0 {
 		color.New(color.FgCyan, color.Bold).Print("Deleted:\n")
@@ -98,6 +101,9 @@ func printAdded(leftKeys, rightKeys mapset.Set) {
 	rightKeys.Difference(leftKeys).Each(func(elem interface{}) bool {
 		added = append(added, elem.(string))
 		return false
+	})
+	sort.Slice(added, func(i, j int) bool {
+		return added[i] < added[j]
 	})
 
 	if len(added) > 0 {
