@@ -37,23 +37,29 @@ func run() error {
 	}
 
 	options := &bolt.Options{ReadOnly: true}
+	log.Printf("Opening %s...", args[0])
 	left, err := bolt.Open(args[0], 0600, options)
 	if err != nil {
 		return err
 	}
 	defer left.Close()
 
+	log.Printf("Opening %s...", args[1])
 	right, err := bolt.Open(args[1], 0600, options)
 	if err != nil {
 		return err
 	}
 	defer right.Close()
 
+	log.Printf("Traversing %s keys...", args[0])
 	leftKeys, err := walkKeys(left)
 	if err != nil {
 		return err
 	}
 
+	log.Printf("Keys (%s): %d", args[0], leftKeys.Cardinality())
+
+	log.Printf("Traversing %s keys...", args[1])
 	rightKeys, err := walkKeys(right)
 	if err != nil {
 		return err
@@ -62,6 +68,7 @@ func run() error {
 	printDeleted(leftKeys, rightKeys)
 	printAdded(leftKeys, rightKeys)
 	if err = printModified(left, right, leftKeys, rightKeys); err != nil {
+	log.Printf("Keys (%s): %d", args[1], rightKeys.Cardinality())
 		return err
 	}
 
