@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -41,6 +42,7 @@ var (
 	keyOnly        = flag.Bool("key-only", false, "show only key names without value diffs")
 	verbose        = flag.Bool("verbose", false, "print verbose logs")
 	bucketPath     stringSlice
+	ignoreFields   stringSlice
 	excludePattern = flag.String("exclude-pattern", "", "exclude keys")
 	skipAdded      = flag.Bool("skip-added", false, "suppress added keys")
 	skipDeleted    = flag.Bool("skip-deleted", false, "suppress deleted keys")
@@ -59,6 +61,7 @@ func run() error {
 	var err error
 
 	flag.Var(&bucketPath, "bucket", "bucket path to compare (can be specified multiple times for nested buckets, e.g., -bucket parent -bucket child)")
+	flag.Var(&ignoreFields, "ignore-field", "JSON field to ignore when comparing (can be specified multiple times, supports nested fields like 'metadata.timestamp')")
 	flag.Parse()
 	args := flag.Args()
 	if len(args) != 2 {
@@ -207,7 +210,19 @@ func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, r
 			v1, v2 = string(leftValue), string(rightValue)
 		}
 
-		if diff := cmp.Diff(v1, v2); diff != "" {
+		// If ignore-field is specified, try to parse as JSON and use FilterPath
+		var opts []cmp.Option
+		if len(ignoreFields) > 0 {
+			var leftJSON, rightJSON any
+			if err := json.Unmarshal(leftValue, &leftJSON); err == nil {
+				if err := json.Unmarshal(rightValue, &rightJSON); err == nil {
+					v1, v2 = leftJSON, rightJSON
+					opts = append(opts, cmp.FilterPath(makeIgnoreFieldsFilter(ignoreFields), cmp.Ignore()))
+				}
+			}
+		}
+
+		if diff := cmp.Diff(v1, v2, opts...); diff != "" {
 			modifiedItems = append(modifiedItems, modified{
 				key:  key,
 				diff: diff,
@@ -235,6 +250,48 @@ func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, r
 		fmt.Println(m.diff)
 	}
 	return nil
+}
+
+// makeIgnoreFieldsFilter creates a cmp.FilterPath function that ignores specified JSON fields.
+// It supports nested fields like "metadata.timestamp" which would match the path ["metadata", "timestamp"].
+func makeIgnoreFieldsFilter(fields []string) func(cmp.Path) bool {
+	// Build a set of field paths to ignore
+	ignorePaths := make(map[string]bool)
+	for _, field := range fields {
+		ignorePaths[field] = true
+	}
+
+	return func(p cmp.Path) bool {
+		// Build the current path as a dot-separated string
+		var pathParts []string
+		for _, ps := range p {
+			switch x := ps.(type) {
+			case cmp.MapIndex:
+				if key, ok := x.Key().Interface().(string); ok {
+					pathParts = append(pathParts, key)
+				}
+			}
+		}
+
+		if len(pathParts) == 0 {
+			return false
+		}
+
+		// Check if any prefix of the current path matches an ignore pattern
+		// This allows ignoring "foo" to also ignore "foo.bar", "foo.baz", etc.
+		currentPath := ""
+		for i, part := range pathParts {
+			if i > 0 {
+				currentPath += "."
+			}
+			currentPath += part
+			if ignorePaths[currentPath] {
+				return true
+			}
+		}
+
+		return false
+	}
 }
 
 func getValue(db *bolt.DB, key string) ([]byte, error) {
