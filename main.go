@@ -221,12 +221,21 @@ func getValue(db *bolt.DB, key string) ([]byte, error) {
 	keys := strings.Split(key, separator)
 	buckets, key := keys[:len(keys)-1], keys[len(keys)-1]
 	err := db.View(func(tx *bolt.Tx) error {
+		if len(buckets) == 0 {
+			return fmt.Errorf("invalid key format: %s", key)
+		}
 		bucket := tx.Bucket([]byte(buckets[0]))
+		if bucket == nil {
+			return fmt.Errorf("bucket not found: %s", buckets[0])
+		}
 		for _, b := range buckets[1:] {
 			if b == "" {
 				break
 			}
 			bucket = bucket.Bucket([]byte(b))
+			if bucket == nil {
+				return fmt.Errorf("bucket not found: %s", b)
+			}
 		}
 		value = bucket.Get([]byte(key))
 		return nil
