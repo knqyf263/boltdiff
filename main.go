@@ -264,6 +264,7 @@ func prepareForDiff(leftValue, rightValue []byte) (v1, v2 any, opts []cmp.Option
 
 // makeIgnoreFieldsFilter creates a cmp.FilterPath function that ignores specified JSON fields.
 // It supports nested fields like "metadata.timestamp" which would match the path ["metadata", "timestamp"].
+// Array indices are skipped, so "items.timestamp" matches both "items[0].timestamp" and "items[1].timestamp".
 func makeIgnoreFieldsFilter(fields []string) func(cmp.Path) bool {
 	// Build a set of field paths to ignore
 	ignorePaths := make(map[string]bool)
@@ -272,7 +273,7 @@ func makeIgnoreFieldsFilter(fields []string) func(cmp.Path) bool {
 	}
 
 	return func(p cmp.Path) bool {
-		// Build the current path as a dot-separated string
+		// Build the current path as a dot-separated string, skipping array indices
 		var pathParts []string
 		for _, ps := range p {
 			switch x := ps.(type) {
@@ -280,6 +281,10 @@ func makeIgnoreFieldsFilter(fields []string) func(cmp.Path) bool {
 				if key, ok := x.Key().Interface().(string); ok {
 					pathParts = append(pathParts, key)
 				}
+			case cmp.SliceIndex:
+				// Skip array indices - this allows "items.timestamp" to match
+				// both "items[0].timestamp" and "items[1].timestamp"
+				continue
 			}
 		}
 
