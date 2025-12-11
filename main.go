@@ -21,10 +21,22 @@ const (
 	separator = " -> "
 )
 
+type stringSlice []string
+
+func (s *stringSlice) String() string {
+	return strings.Join(*s, ", ")
+}
+
+func (s *stringSlice) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
 var (
 	raw            = flag.Bool("raw", false, "print raw bytes")
 	summary        = flag.Bool("summary", false, "print summary")
 	keyOnly        = flag.Bool("key-only", false, "show only key names without value diffs")
+	bucketPath     stringSlice
 	excludePattern = flag.String("exclude-pattern", "", "exclude keys")
 	skipAdded      = flag.Bool("skip-added", false, "suppress added keys")
 	skipDeleted    = flag.Bool("skip-deleted", false, "suppress deleted keys")
@@ -42,6 +54,7 @@ func main() {
 func run() error {
 	var err error
 
+	flag.Var(&bucketPath, "bucket", "bucket path to compare (can be specified multiple times for nested buckets, e.g., -bucket parent -bucket child)")
 	flag.Parse()
 	args := flag.Args()
 	if len(args) != 2 {
@@ -72,7 +85,7 @@ func run() error {
 	defer func() { _ = right.Close() }()
 
 	log.Printf("Traversing %s keys...", args[0])
-	leftKeys, err := walkKeys(left)
+	leftKeys, err := walkKeys(left, bucketPath)
 	if err != nil {
 		return err
 	}
@@ -80,7 +93,7 @@ func run() error {
 	log.Printf("Keys (%s): %d", args[0], leftKeys.Size())
 
 	log.Printf("Traversing %s keys...", args[1])
-	rightKeys, err := walkKeys(right)
+	rightKeys, err := walkKeys(right, bucketPath)
 	if err != nil {
 		return err
 	}
@@ -251,9 +264,33 @@ func walkBucket(b *bolt.Bucket, buckets []string) (*strset.Set, error) {
 	return keys, nil
 }
 
-func walkKeys(db *bolt.DB) (*strset.Set, error) {
+func walkKeys(db *bolt.DB, targetBuckets []string) (*strset.Set, error) {
 	keys := strset.New()
 	err := db.View(func(tx *bolt.Tx) error {
+		// If a specific bucket path is specified, navigate directly to it
+		if len(targetBuckets) > 0 {
+			bucket := tx.Bucket([]byte(targetBuckets[0]))
+			if bucket == nil {
+				log.Printf("    Bucket not found: %s", targetBuckets[0])
+				return nil
+			}
+			for _, name := range targetBuckets[1:] {
+				bucket = bucket.Bucket([]byte(name))
+				if bucket == nil {
+					log.Printf("    Bucket not found: %s", name)
+					return nil
+				}
+			}
+			log.Printf("    Bucket: %s", strings.Join(targetBuckets, separator))
+			bucketKeys, err := walkBucket(bucket, targetBuckets)
+			if err != nil {
+				return err
+			}
+			keys.Merge(bucketKeys)
+			return nil
+		}
+
+		// Walk all buckets from root
 		g, ctx := errgroup.WithContext(context.Background())
 		sem := semaphore.NewWeighted(20)
 		done := make(chan struct{})
