@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -192,7 +193,16 @@ func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, r
 			return false
 		}
 
-		var v1, v2 interface{} = leftValue, rightValue
+		// Fast path: use bytes.Equal when we only need to detect changes (key-only or summary mode)
+		if *keyOnly || *summary {
+			if !bytes.Equal(leftValue, rightValue) {
+				modifiedItems = append(modifiedItems, modified{key: key})
+			}
+			return true
+		}
+
+		// Slow path: compute diff for display
+		var v1, v2 any = leftValue, rightValue
 		if !*raw {
 			v1, v2 = string(leftValue), string(rightValue)
 		}
