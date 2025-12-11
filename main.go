@@ -205,23 +205,7 @@ func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, r
 		}
 
 		// Slow path: compute diff for display
-		var v1, v2 any = leftValue, rightValue
-		if !*raw {
-			v1, v2 = string(leftValue), string(rightValue)
-		}
-
-		// If ignore-field is specified, try to parse as JSON and use FilterPath
-		var opts []cmp.Option
-		if len(ignoreFields) > 0 {
-			var leftJSON, rightJSON any
-			if err := json.Unmarshal(leftValue, &leftJSON); err == nil {
-				if err := json.Unmarshal(rightValue, &rightJSON); err == nil {
-					v1, v2 = leftJSON, rightJSON
-					opts = append(opts, cmp.FilterPath(makeIgnoreFieldsFilter(ignoreFields), cmp.Ignore()))
-				}
-			}
-		}
-
+		v1, v2, opts := prepareForDiff(leftValue, rightValue)
 		if diff := cmp.Diff(v1, v2, opts...); diff != "" {
 			modifiedItems = append(modifiedItems, modified{
 				key:  key,
@@ -250,6 +234,32 @@ func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, r
 		fmt.Println(m.diff)
 	}
 	return nil
+}
+
+// prepareForDiff converts byte values to appropriate types for comparison.
+// If ignore-field is specified and values are valid JSON, it parses them and returns cmp options.
+func prepareForDiff(leftValue, rightValue []byte) (v1, v2 any, opts []cmp.Option) {
+	v1, v2 = leftValue, rightValue
+	if !*raw {
+		v1, v2 = string(leftValue), string(rightValue)
+	}
+
+	if len(ignoreFields) == 0 {
+		return v1, v2, nil
+	}
+
+	var leftJSON, rightJSON any
+	if err := json.Unmarshal(leftValue, &leftJSON); err != nil {
+		return v1, v2, nil
+	}
+	if err := json.Unmarshal(rightValue, &rightJSON); err != nil {
+		return v1, v2, nil
+	}
+
+	opts = []cmp.Option{
+		cmp.FilterPath(makeIgnoreFieldsFilter(ignoreFields), cmp.Ignore()),
+	}
+	return leftJSON, rightJSON, opts
 }
 
 // makeIgnoreFieldsFilter creates a cmp.FilterPath function that ignores specified JSON fields.
