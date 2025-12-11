@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -36,6 +38,7 @@ var (
 	raw            = flag.Bool("raw", false, "print raw bytes")
 	summary        = flag.Bool("summary", false, "print summary")
 	keyOnly        = flag.Bool("key-only", false, "show only key names without value diffs")
+	verbose        = flag.Bool("verbose", false, "print verbose logs")
 	bucketPath     stringSlice
 	excludePattern = flag.String("exclude-pattern", "", "exclude keys")
 	skipAdded      = flag.Bool("skip-added", false, "suppress added keys")
@@ -62,6 +65,14 @@ func run() error {
 		return nil
 	}
 
+	// Setup slog based on verbose flag
+	logLevel := slog.LevelWarn
+	if *verbose {
+		logLevel = slog.LevelInfo
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	slog.SetDefault(logger)
+
 	if *excludePattern != "" {
 		excludeRegexp, err = regexp.Compile(*excludePattern)
 		if err != nil {
@@ -70,35 +81,35 @@ func run() error {
 	}
 
 	options := &bolt.Options{ReadOnly: true}
-	log.Printf("Opening %s...", args[0])
+	slog.Info("Opening database", "path", args[0])
 	left, err := bolt.Open(args[0], 0600, options)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = left.Close() }()
 
-	log.Printf("Opening %s...", args[1])
+	slog.Info("Opening database", "path", args[1])
 	right, err := bolt.Open(args[1], 0600, options)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = right.Close() }()
 
-	log.Printf("Traversing %s keys...", args[0])
+	slog.Info("Traversing keys", "path", args[0])
 	leftKeys, err := walkKeys(left, bucketPath)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("Keys (%s): %d", args[0], leftKeys.Size())
+	slog.Info("Keys found", "path", args[0], "count", leftKeys.Size())
 
-	log.Printf("Traversing %s keys...", args[1])
+	slog.Info("Traversing keys", "path", args[1])
 	rightKeys, err := walkKeys(right, bucketPath)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("Keys (%s): %d", args[1], rightKeys.Size())
+	slog.Info("Keys found", "path", args[1], "count", rightKeys.Size())
 
 	if !*skipDeleted {
 		printDeleted(leftKeys, rightKeys)
@@ -280,17 +291,17 @@ func walkKeys(db *bolt.DB, targetBuckets []string) (*strset.Set, error) {
 		if len(targetBuckets) > 0 {
 			bucket := tx.Bucket([]byte(targetBuckets[0]))
 			if bucket == nil {
-				log.Printf("    Bucket not found: %s", targetBuckets[0])
+				slog.Warn("Bucket not found", "bucket", targetBuckets[0])
 				return nil
 			}
 			for _, name := range targetBuckets[1:] {
 				bucket = bucket.Bucket([]byte(name))
 				if bucket == nil {
-					log.Printf("    Bucket not found: %s", name)
+					slog.Warn("Bucket not found", "bucket", name)
 					return nil
 				}
 			}
-			log.Printf("    Bucket: %s", strings.Join(targetBuckets, separator))
+			slog.Info("Scanning bucket", "bucket", strings.Join(targetBuckets, separator))
 			bucketKeys, err := walkBucket(bucket, targetBuckets)
 			if err != nil {
 				return err
@@ -320,7 +331,7 @@ func walkKeys(db *bolt.DB, targetBuckets []string) (*strset.Set, error) {
 			g.Go(func() error {
 				defer sem.Release(1)
 
-				log.Printf("    Bucket: %s", string(name))
+				slog.Info("Scanning bucket", "bucket", string(name))
 				bucketKeys, err := walkBucket(b, []string{string(name)})
 				if err != nil {
 					return err
