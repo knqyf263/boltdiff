@@ -197,14 +197,15 @@ func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, r
 		}
 
 		// Fast path: use bytes.Equal when we only need to detect changes (key-only or summary mode)
-		if *keyOnly || *summary {
+		// Skip fast path if ignore-field is specified (need JSON parsing)
+		if (*keyOnly || *summary) && len(ignoreFields) == 0 {
 			if !bytes.Equal(leftValue, rightValue) {
 				modifiedItems = append(modifiedItems, modified{key: key})
 			}
 			return true
 		}
 
-		// Slow path: compute diff for display
+		// Slow path: compute diff for display (or when ignore-field is specified)
 		v1, v2, opts := prepareForDiff(leftValue, rightValue)
 		if diff := cmp.Diff(v1, v2, opts...); diff != "" {
 			modifiedItems = append(modifiedItems, modified{
