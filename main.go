@@ -24,6 +24,7 @@ const (
 var (
 	raw            = flag.Bool("raw", false, "print raw bytes")
 	summary        = flag.Bool("summary", false, "print summary")
+	keyOnly        = flag.Bool("key-only", false, "show only key names without value diffs")
 	excludePattern = flag.String("exclude-pattern", "", "exclude keys")
 	skipAdded      = flag.Bool("skip-added", false, "suppress added keys")
 	skipDeleted    = flag.Bool("skip-deleted", false, "suppress deleted keys")
@@ -188,7 +189,12 @@ func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, r
 	if *summary {
 		return nil
 	}
+	yellow := color.New(color.FgYellow)
 	for _, m := range modifiedItems {
+		if *keyOnly {
+			_, _ = yellow.Printf("*** %s\n", m.key)
+			continue
+		}
 		_, _ = bold.Printf("diff a/%s b/%s\n", leftPath, rightPath)
 		_, _ = bold.Printf("--- a/%s\n", m.key)
 		_, _ = bold.Printf("+++ b/%s\n", m.key)
