@@ -61,14 +61,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer left.Close()
+	defer func() { _ = left.Close() }()
 
 	log.Printf("Opening %s...", args[1])
 	right, err := bolt.Open(args[1], 0600, options)
 	if err != nil {
 		return err
 	}
-	defer right.Close()
+	defer func() { _ = right.Close() }()
 
 	log.Printf("Traversing %s keys...", args[0])
 	leftKeys, err := walkKeys(left)
@@ -112,13 +112,13 @@ func printDeleted(leftKeys, rightKeys *strset.Set) {
 	})
 
 	if len(deleted) > 0 {
-		color.New(color.FgCyan, color.Bold).Printf("Deleted: %d\n", len(deleted))
+		_, _ = color.New(color.FgCyan, color.Bold).Printf("Deleted: %d\n", len(deleted))
 		if *summary {
 			return
 		}
 		red := color.New(color.FgRed)
 		for _, d := range deleted {
-			red.Printf("--- %s\n", d)
+			_, _ = red.Printf("--- %s\n", d)
 		}
 	}
 }
@@ -134,13 +134,13 @@ func printAdded(leftKeys, rightKeys *strset.Set) {
 	})
 
 	if len(added) > 0 {
-		color.New(color.FgCyan, color.Bold).Printf("\nAdded: %d\n", len(added))
+		_, _ = color.New(color.FgCyan, color.Bold).Printf("\nAdded: %d\n", len(added))
 		if *summary {
 			return
 		}
 		green := color.New(color.FgGreen)
 		for _, a := range added {
-			green.Printf("+++ %s\n", a)
+			_, _ = green.Printf("+++ %s\n", a)
 		}
 	}
 }
@@ -184,14 +184,14 @@ func printModified(leftPath, rightPath string, left, right *bolt.DB, leftKeys, r
 		return err
 	}
 
-	color.New(color.FgCyan, color.Bold).Printf("\nModified: %d\n", len(modifiedItems))
+	_, _ = color.New(color.FgCyan, color.Bold).Printf("\nModified: %d\n", len(modifiedItems))
 	if *summary {
 		return nil
 	}
 	for _, m := range modifiedItems {
-		bold.Printf("diff a/%s b/%s\n", leftPath, rightPath)
-		bold.Printf("--- a/%s\n", m.key)
-		bold.Printf("+++ b/%s\n", m.key)
+		_, _ = bold.Printf("diff a/%s b/%s\n", leftPath, rightPath)
+		_, _ = bold.Printf("--- a/%s\n", m.key)
+		_, _ = bold.Printf("+++ b/%s\n", m.key)
 		fmt.Println(m.diff)
 	}
 	return nil
